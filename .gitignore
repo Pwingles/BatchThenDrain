@@ -1,0 +1,29 @@
+# Build artifacts
+batch_generator
+harness
+*.o
+*.out
+*.a
+*.so
+*.dylib
+
+# CMake build directories
+cmake-build-debug/
+build/
+CMakeCache.txt
+CMakeFiles/
+
+# Compiled binaries
+*.exe
+*.bin
+
+# Editor files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+*.tmp
+*.log
+

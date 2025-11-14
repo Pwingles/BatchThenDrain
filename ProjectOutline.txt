@@ -1,0 +1,107 @@
+
+Skip To Content
+Dashboard
+Kevin Rodriguez
+Account
+Dashboard
+Courses
+Calendar
+Inbox
+History
+9 unread release notes.9
+Help
+M-CS 315-001-003 Fall 2025AssignmentsProject 5 -- Part 1 -- The Batch-then-drain trace
+
+Fall 2025
+Home
+Announcements
+Syllabus
+Modules
+Grades14
+Seawolf Bundle
+University Library
+Smart Search
+Gradescope
+Project 5 -- Part 1 -- The Batch-then-drain trace
+Due Friday by 6pm  Points 75  Submitting a file upload  File Types zip
+Empirical Analysis of Batch-then-Drain Profile 
+Introduction
+In the Huffman profile you worked through a complete, reproducible timing pipeline—trace generation, harness replay, CSV output, and plotting—using a concrete workload. In this project you’ll build on that foundation to study a second, contrasting workload: batch-then-drain. Whereas Huffman interleaves inserts with repeated extractions, batch-then-drain models “build once, then empty the queue” scenarios you’ll see in heapsort and offline task scheduling. We’ll keep the same conventions we used in the implementation of the Huffman profile. 
+
+References: Empirical Analysis of Huffman Profiles and Framework for Experimental Analysis of Data Structures
+
+What this project is about
+You will implement a standalone trace generator for the batch-then-drain profile following the conventions that we used in generating traces for Huffman profile, make adjustments to the existing harness so it can replay this profile, once again, following the same footsteps as in the timing of the Huffman profit, and then time all four given implementations (Linear baseline, Binary-heap, Binomial queues, and the N² reference) on each trace file. Your harness will produce CSVs that the provided HTML page can plot, and you’ll submit a report interpreting what the plots say—mirroring the style of your Huffman write-up. Whenever you need details on format, timing policy, or plotting, refer back to the framework and the Huffman example you already read.
+
+Goals
+Transfer the pattern: follow the same process—generate traces, replay them with the harness to produce CSVs, and use those CSVs to plot the timed traces. Write new code for the batch-then-drain trace generator and make minimal changes to the harness to accommodate the new profile.
+
+Generate fair, reproducible traces. Produce batch-then-drain traces that match your Huffman conventions (header, filenames, key/id rules, and seed policy).
+
+Use the harness effectively. Reuse the existing harness and integrate the new profile with small, well-scoped changes.
+
+Compare four implementations. Run the Linear baseline, Binary-heap, Binomial queues, and N² implementations on the same traces and aggregate results.
+
+Interpret performance. Relate observed curves to the batch-then-drain operation pattern, discussing constant factors vs. asymptotic trends.
+
+Communicate clearly. Present at least one concise figure from the HTML plot and a narrative that answers “what did we learn?” 
+
+Your tasks
+Trace generator
+Implement a generator for the batch-then-drain profile using the exact parameters/conventions you used for Huffman. Using the same conventions will result in reusing much of the code that you have been given for the harness application. 
+
+In the Huffman trace generation, we limited the range of random numbers to produce many duplicates. That is not the case in this profile. You should set the range of the distribution function between 1 and . 
+Harness
+Reuse the Huffman harness and add support for the new profile name (e.g., batch_then_drain) with the same replay logic you used for Huffman profile. Keep the CSV schema/fields identical to the Huffman run.
+
+Follow the same project layout, scaling plan (powers-of-two Ns), seeds, timing policy (warm-up + medians), and “don’t time parsing/logging” discipline—exactly as in Huffman.
+
+ 
+
+Implementations to time (all four)
+Run the Linear baseline, Binary-heap, Binomial queues, and the N^2 implementation on the same batch-then-drain traces (just as you did for Huffman). Include all four in a single CSV so the provided HTML can overlay them. In the Huffman harness, we stopped timing Oracle (the N^2 algorithm) beyond  because (1) it becomes prohibitively slow as grows, and (2) its large runtimes dwarf the  curves, obscuring the comparison. However, just to experiment with the numbers and the curves that get generated, you are encourage to run the Oracle implementation up to N = 2^17, plot it to see the quadratic growth. But, do not base your analysis on that. Instead, stope where the Huffman replay stops.
+
+ 
+
+Report (short; mirror Huffman)
+Submit a concise 1–2 page write-up with:
+
+Question & hypothesis for batch-then-drain,
+
+Method (reference Huffman/framework choices you followed: trace pattern, Ns/seeds, timing, implementations),
+
+Results (one plot from the HTML + a one-sentence takeaway),
+
+Interpretation tied to the batch-then-drain pattern.
+
+Deliverables
+Batch-then-drain trace generator. Create a directory for this profile and store your main function in that directory. 
+
+Traces for all (N, seed) you ran stored in a directory for this profile (same set as Huffman).
+
+CSV(s) covering all four implementations.
+
+Plot using the CSVs that your harness generates and include in the report file (next.)
+
+Short report (Markdown and PDF), call it BatchThenDrainReport.md and BatchThenDrainReport.pdf, respectively. This file, just like the README file should be stored in the project directory.
+
+Include a README, as usual. However, you must clearly specify the command(s) needed to compile and run your executables—one for the generator and one for the harness. Additionally, describe what to expect after running the generator or the harness: which files are generated and where they are stored. The output files should, of course, be saved in the directories that already exist in the project you were given.
+
+ 
+
+What to submit
+A zip file of your project directory, similar to the seed files that we provided.
+
+ 
+
+How we grade your submission 
+
+We will run your trace generator and compare its output with that of ours. Therefore, you should make sure to use the random-number generator in the same way that it has been used for the Huffman trace. 
+
+30 points for correctly generating the trace files. If your generator doesn't work properly, regardless of your report, you will get a maximum of 20 points for the entire project.
+30 points for a well-composed, well-formatted report. A rushed report and is not well organized will lose the points in this category. 
+40 points for a thoughtful analysis of the results. Please see section 10 of Framework for Experimental Analysis of Data Structures.
+ 
+
+ 
+

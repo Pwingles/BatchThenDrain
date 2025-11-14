@@ -1,0 +1,599 @@
+
+Skip To Content
+Dashboard
+Kevin Rodriguez
+Account
+Dashboard
+Courses
+Calendar
+Inbox
+History
+9 unread release notes.9
+Help
+M-CS 315-001-003 Fall 2025AssignmentsFramework for Experimental Analysis of Data Structures
+
+Fall 2025
+Home
+Announcements
+Syllabus
+Modules
+Grades15
+Seawolf Bundle
+University Library
+Smart Search
+Gradescope
+Framework for Experimental Analysis of Data Structures
+Due No Due Date  Points None
+A Framework for Empirical analysis of data structures
+
+When you learn data structures, you usually see multiple ways to provide the same set of operations. for example, priority queues can be built with a vector-based Binary Heap, a Binomial Queue, a Pairing Heap, or even a sorted array. All of these share a common api—insert, find-min, delete-min (possibly also increase key and decrease key)—but they make different design choices under the hood. Those choices place each structure into a different computational class and lead to different performance in practice.
+
+Theory helps us reason about these choices. Worst-case analyses promise an upper bound that never gets exceeded, amortized analyses average the cost of operations across sequences (so a single operation might be expensive, but the average stays low), and randomized analyses describe expected behavior when the structure uses randomness internally (or when inputs are unpredictable). These guarantees are powerful, but they don’t fully answer a practical question you often care about as an engineer: for the kinds of workloads I actually have, which implementation is faster, more memory-efficient, and more predictable?
+
+That’s where empirical analysis comes in. The goal is to run carefully designed experiments that exercise competing data structures through the same interface, record consistent measurements, and draw defensible conclusions from the data. Unlike ad-hoc timing, a good empirical study forces you to plan ahead: what inputs will you use, how will you generate them, which operations and mixes of operations matter, what metrics will you collect, and how will you visualize and interpret the results?
+
+In this write-up, we will build a general-purpose framework for comparing data structures that implement the same API. the framework will spell out how to set up experiments, which data to collect, and how to analyze the results. To make everything concrete and approachable, we will walk through the process using two specific implementations as our running example—for instance, a vector-based binary heap and a binomial queue for the priority-queue API. the point isn’t to pick a winner; it’s to learn how to ask fair questions, control variables, and turn raw measurements into insight.
+
+Along the way, we will connect theory to practice. Worst-case, amortized, and randomized guarantees will guide our expectations, while measurements will reveal constant factors, cache behavior, memory overhead, and dataset effects that asymptotic bounds don’t capture. We will also practice good experimental practice: repeat trials to reduce noise, fix random seeds when appropriate, warm up the runtime, and report the spread of results (not just a single number).
+
+By the end, you will have a template you can reuse whenever you face multiple implementations of the same interface. You will know how to define meaningful workloads, collect trustworthy metrics, and present results clearly—skills that transfer directly to systems work, algorithm engineering, and performance-sensitive application development.
+
+ 
+
+Please read this document along with Empirical Analysis of Huffman Profile. It is intended to provide a concrete example of the applications of this write up.
+
+ 
+
+Objectives
+The goal of this mini‑study is to learn how to empirically compare data structures that implement the same API (here: insert, findMin, deleteMin) and to connect those observations back to what asymptotic analysis predicts.
+
+By the end, you should be able to:
+
+Connect the theoretical and practical analysis of the run-time of data structures
+Explain how Big‑O describes growth trends while real machines add constants, cache effects, and allocation overhead—and reconcile any gaps between predicted and observed behavior.
+
+Design a sound benchmark for measuring run-time of operations
+Build a small, focused harness that: (a) generates controlled workloads, (b) times a single operation family at a time, and (c) repeats trials across increasing input sizes.
+
+Use C++ tools to collect measurements 
+Use std::chrono::steady_clock to time code regions; normalize to cost per operation (e.g., ns/op); avoid measuring I/O or setup code; and report medians across trials.
+
+Control variables for fairness
+Hold constant the compiler, dataset, and random seed; vary only the factor under study (the implementation). Document anything that could bias results.
+
+Practice a reproducible process.
+Export results to CSV and generate charts so someone else can reproduce both your numbers and your figures later. 
+
+Analyze and communicate findings.
+
+Produce clear plots (cost vs. N) and a brief write-up that includes:
+    •    a clear claim about the expected run time of specific operations for a given data-structure implementation,
+    •    evidence showing the observed behavior of the data structure in practice, and
+    •    reasoning that interprets the results.
+
+In other words, state your claim (e.g., “heap insert scales as ≈ log N”), present the corresponding plot or table, and then explain why the observed curve behaves as it does.
+
+ 
+
+Section 1 — Terms and background
+ 
+
+Online vs Offline
+
+Offline means all inputs are known before you start; you can load everything and then process (e.g., sort N numbers by inserting them all, then extracting in order). Online means inputs arrive over time and you must interleave operations as you go (insert, findMin, deleteMin, repeat). We test both because some data structures shine when they can “prepare” once, while others do better under steady interleaving.
+
+Total ordering via an id
+
+Keys can tie, so we attach a unique id to every item (key id) and compare by key first, then id. This makes the order total and deterministic: there is always a single “smallest” item, even when many share the same key. Determinism keeps checks simple, ensures different implementations can be compared step-by-step, and prevents “almost the same” outputs from clouding plots.
+
+An operation trace
+
+A trace is a recorded, step-by-step script of API calls with concrete arguments you plan to run against a data structure. In the context of priority queues, a sequence of I (insert key id), F (findMin), and D (deleteMin). Here is an example. For an extensive discussion of traces and how to generate them, see Empirical Analysis of Huffman Profile.
+
+ 
+
+# seed: 42
+# profile: batch-then-drain (more on this later); 
+# N=4
+I 5 10
+I 5 2
+I 1 7
+I 3 9
+F
+D
+F
+D
+F
+D
+F
+D
+Given this exact trace, any correct implementation produces the same answers step-by-step, which makes correctness checking and fair timing possible. Please note that the key in the operation "I 5 10" is 5, its id is 10 while the key of "I 5 2" is also 5, but its id is 2. 
+
+Random numbers, seeds, and how they relate to the trace
+
+Randomness is used only in the generator to build datasets, not inside implementations. A seed initializes the generator so the same seed always yields the same trace. For example, the trace above might be exactly what seed 42 produces; seed 314 would produce a different sequence of I/F/D and different keys, but still follow the same profile. Using several seeds lets us see whether conclusions hold across input variations, and reusing the same seed set for every implementation keeps comparisons fair.
+
+Averaging timed traces 
+
+Running and timing a single trace can be misleading: background activity, cold caches, or a one-time hiccup can make a run unusually slow or fast. Averaging across runs helps mitigate these effects. Multiple trials of the same trace (same seed) smooth out system noise so that an outlier doesn’t define the result, while multiple seeds sample different traces so your conclusions aren’t based on a single lucky or unlucky input. Reporting a measure of center (typically the median) together with a measure of spread (Interquartile Range — the middle three of five median values) makes the experiment more robust and less sensitive to random fluctuations.
+
+The roles of the operating system
+
+Timings can jump around at first because the computer is getting ready behind the scenes—loading your program and data into memory and sharing the processor with other tasks. The hardware also “warms up”: the CPU starts to remember which parts of memory your program uses most and learns the patterns in your loops and decisions. After a short while, the runs settle into a steady rhythm. To handle this, we do an untimed warm-up (or ignore the first timed run) and take several measurements, then average them to smooth out any random variation.
+
+Oracle
+
+An oracle is a straightforward, trusted version of your program that serves as a reference for checking correctness. It’s not meant to be fast—just obviously right. You feed it the same sequence of operations (insert, find, delete, extract) and use it to produce the “answer key” of expected results. Then you run your own implementation on the same inputs and compare the outputs step by step. If the two ever disagree, you’ve found where your code went wrong. The oracle keeps the focus on clarity rather than performance—for example, using a simple sorted list for a priority queue.
+
+ 
+
+Section 2 — define the API and correctness
+Before we can compare two implementations fairly, we have to agree on the common interface they provide: the API. The API specifies exactly what operations exist, what each is supposed to do, and what counts as correct behavior. Once this contract is clear, we can design inputs, check outputs, and be confident that any performance differences we measure are about implementation choices rather than mismatched measurements. 
+
+Here is a summary of steps. We will elaborate on many of the items on this list in the future sections.
+
+Start by naming the abstract data type and listing the operations
+
+Pick the ADT you’re comparing and write down the minimal set of operations you actually need. For a priority queue, for example:
+
+bulkInsert(v)          // add all elements in vector v -- an offline build
+insert(x)              // add item x
+findMin() -> x         // return the smallest item (does not remove it)
+deleteMin()            // remove and the smallest item
+extractMin() -> x.     // remove and return the smallest item
+isEmpty() -> bool
+size() -> int
+We have intentionally excluded the important heap operations increase key, decrease key, and meld for this study as they are more algorithmic-centric operations. 
+
+Next, pin down the data model and ordering
+
+Define a comparator every implementation will use identically. As stated in Section 1, simple pattern is items as (key, id): lower key means higher priority (this seems backward, but in min-heaps, the item with the smallest value has the highest priority whereas in a max-heap, the item with the largest value has the highest priority); if keys tie, lower id wins. Decide whether duplicates are allowed and what they mean; with unique ids, duplicate keys are fine and represent distinct items.
+
+Give each operation a short, precise contract
+
+For example: insert adds one item to the multiset; findMin requires nonempty precondition and returns the smallest item without changing the structure; deleteMin requires nonempty and removes the smallest item; extractMin requires non-empty, removes and returns the smallest item. Decide and document error behavior for empty-structure calls (throw an exception and terminate, as for example STL stack does, or avoid in tests by keeping track of the number items in the queue as you generate the tests) and be consistent.
+
+Eliminate ambiguity with a clear tie-breaking rule
+
+In programming, tie-breaking is a common source of subtle bugs. Make the comparator total (keys first, then ids) and keep that rule in one place so every implementation and test reuses it. More on this later. 
+
+Define correctness over sequences, not just single calls
+
+Experiments run long sequences. After any series of inserts and deletions, the contents must equal “everything inserted minus everything deleted,” and findMin must point to the current smallest item. For offline tasks (e.g., sorting via a priority queue), the full stream of deleteMin results must be sorted by the comparator. You will see later how to design oracles for testing to raise confidence in correctness.
+
+Choose a simple reference model to check correctness
+
+As we mentioned above, an oracle is a straightforward, trusted version of your program that serves as a reference for checking correctness. It’s not meant to be fast—just obviously right. You feed it the same sequence of operations (insert, find, delete, extract) and use it to produce the “answer key” of expected results. Then you run your own implementation on the same inputs and compare the outputs step by step. If the two ever disagree, you’ve found where your code went wrong. The oracle keeps the focus on clarity rather than performance—for example, using a simple sorted list for a priority queue.
+
+ 
+
+Section 3 — concrete workload profiles
+When we compare implementations, we’re really comparing how they behave under the kinds of usage patterns real algorithms create. To mimic that behavior and without requiring background on specific algorithms, we’ll describe those patterns directly as small, named “workload profiles.” Each profile is just a story about how operations arrive over time—batch everything and then drain (models heap sort), grow a frontier by popping one and pushing a few (models Prim's minimum spanning-tree algorithm), or keep only the top-k items from a stream (models the leader-board algorithms). (In Empirical Analysis of Huffman Profile we have provided the details of Huffman profile and its associated traces for explicit example of how profiles are defined and implemented.)
+
+For each profile, we generate an operation trace that any priority queue can run.
+
+To keep things concrete and fair, we express traces with the same tiny mnemonics everywhere: I for insert, F for findMin, and D for deleteMin. Because deleteMin is void in our API, “extract the minimum” is always written as F followed by D (often times we add a function called extractMin, which deletes and returns the min value, turning it into an atomic, safer operation.) That convention lets us verify correctness against the oracle first, then run the exact same traces for timing.
+
+ 
+
+Batch-then-drain (offline-sort)
+What it models
+Any task where all items are known up front: sorting N numbers, building a static worklist, or merging pre-collected logs. Because the dataset is fixed at the start, we use an offline build of the priority queue (e.g., heapify for binary heaps), then drain it.
+
+ 
+
+Operation pattern
+Insert all  items once (offline build). Then repeatedly extract the minimum via F/D pairs. No new items are inserted during extraction.
+
+ 
+
+Queue size over time
+Rises to , then monotonically shrinks to 0.
+
+ 
+
+Trace
+repeat N times:
+         I (key_i id_i)
+
+repeat N times:
+        F
+        D
+
+ 
+
+Kruskal profile (early-stop variation of batch-then-drain)
+ 
+
+What it models
+Kruskal’s minimum spanning tree algorithm at the level of the priority queue: load all candidate edges once, then repeatedly take the lightest remaining edge. This is a direct variation of Batch-then-drain with an early stop: instead of draining to empty, you stop after extracting T items.  Just as in batch-then-drain, items are never inserted after the initial batch.
+
+ 
+
+Operation pattern
+Insert all E items once (offline build). Then repeatedly extract via F/D pairs until you have taken exactly T items; stop even if the queue is nonempty.
+
+ 
+
+Queue size over time
+Rises to E, then shrinks until E−T items remain (queue is very likely nonempty at the end).
+
+ 
+
+Trace
+repeat E times:
+        I (key_e id_e)
+
+repeat T times:
+        F
+        D
+# here T < E 
+
+ 
+
+Prim-profile
+What it models
+Frontier-expanding processes where taking one “best” item reveals a handful of new candidates. You can picture a growth process: pop one, then discover several neighbors to consider. No key updates—just new inserts—capturing the interleaved (online) feel of many graph/search tasks.
+
+ 
+
+Operation pattern
+Start with a small seed. Each iteration extracts the current best item (F/D), then inserts a burst of  newly discovered items. Continue for many iterations, then drain whatever remains. This balances insert and deleteMin under interleaving operations.
+
+ 
+
+Queue size over time
+Depending on the burst size (b), it can have many spikes. After so many cycles, stop new inserts and drain the queue to size 0.
+
+ 
+
+Trace (parameters S seed inserts, R repeats, b burst size)
+
+repeat S times:
+
+        I (key_s id_s)
+repeat R times:
+       F
+       D
+       repeat b times: I (key id)
+while not empty:
+       F
+       D
+
+ 
+
+Top-k streaming (bounded-size queue)
+What it models
+Keeping only the largest  items from a long stream (leaderboards, trending metrics, top-k monitoring in search engines). This stresses frequent peeks and occasional replace-the-min updates while the structure stays small and capped.
+
+ 
+
+Operation pattern
+Items arrive one by one. While , insert each item. Once full, peek with F; if the new item beats the current minimum, replace it by doing D then I; otherwise ignore it. This emphasizes findMin cost and the overhead of conditional deleteMin/insert.
+
+ 
+
+Queue size over time
+Capped at  for most of the run.
+
+ 
+
+Trace (parameters  stream length,  capacity)
+ 
+
+repeat M times:
+     let next x = (key,id)
+     if size < k:
+             I key id
+     else if key > min_key (perform F):
+             D
+             I (key id)
+     else:
+       # ignore x
+ 
+
+Section 4 — Datasets and input generation 
+Good experiments start with good data. Two implementations might look the same on one dataset but very different on another—not because either is wrong, but because that particular dataset hides or highlights certain costs. Our goal is to create inputs that are realistic, varied, and reproducible so the comparisons we draw from them are meaningful and fair.
+
+In this project, a dataset means both the workload profile—the sequence of operations you’ll run (insert, find, delete, extract)—and the items that those operations act on. Each item is a small record with a numeric key and a unique ID, written as (key, id [, payload]). The optional payload can hold extra information that helps resolve ties. For example, in Huffman coding, the priority queue orders words by frequency (the key), but when two words have the same frequency, the words themselves break the tie.
+
+Reproducibility is a core principle of experiments like this. Every dataset you generate should come from a fixed random seed and produce an explicit operation trace that you can save and replay. A trace is like a script of actions: insert this exact (key, id), then find the minimum, then delete the minimum, and so on. When you save the trace, include a one-line header recording the seed, the profile name, and any generator parameters. This ensures that anyone—including you later—can rerun the exact same experiment, even on a different machine, and see comparable results without guessing how the data were made.
+
+For a concrete example of what a trace file looks like—and why it’s useful—see Empirical Analysis of the Huffman Profile.
+
+We also need a scaling plan to see how performance changes as problem sizes grow. We’ll use powers of two for the problem size (e.g., ). Powers of two spread points evenly on log-scale plots and make growth trends easier to interpret. For each size, run several independent seeds and summarize both the center (mean or median) and the spread (as described earlier in Section 2). The extra seeds help reduce the risk of drawing conclusions from a single lucky or unlucky run.
+
+You can again refer to Empirical Analysis of the Huffman Profile for an example of generating data across multiple N values in .
+
+The prim-frontier profile behaves a bit differently from the Huffman example. It simulates a growth process where taking one best item tends to reveal a few new candidates. You start with a small seed of inserts. Each iteration performs one extraction (a find followed by a delete) and then inserts a burst of b new items. The queue grows by roughly (b − 1) items per iteration and is finally drained with find/delete pairs at the end. This profile balances insert and delete costs under interleaving and feels more like how real systems behave than a simple batch process.
+
+In the streaming profile, inserts, finds, and deletions (or extractMin operations that combine the two) are triggered as the stream of inserts arrives. The structure stays capped at a fixed size N, so this profile highlights constant factors and the overhead of frequent peeks and occasional replacements. It also forces you to handle ties carefully: we’ll use the simple rule that ties do not replace the current minimum—only strictly larger keys do.
+
+Start with uniform random integers for keys, just as in the Huffman example. Use this baseline across all profiles:
+
+
+    •    Batch-then-drain and Kruskal profiles draw N keys uniformly once (offline build).
+    •    The prim-frontier profile draws each new key uniformly as items are discovered, whether you use the growth variant (which expands by b − 1 per step) or the steady frontier-mix variant (where d = b). 
+
+From there, change one parameter at a time to explore how inputs affect behavior. Shrinking the key range—say from [0, 1,000,000) down to [0, N/32)—creates many duplicates, which exercises the key-then-id tie-breaker and reveals how each implementation handles long runs of equal priority. To create best- or worst-case scenarios in the offline profiles, you can sort the keys (ascending or descending) before building the structure or slightly perturb a sorted list to make it “nearly sorted.” The goal isn’t to find a single correct dataset—it’s to understand how your conclusions change as you move from uniform to duplicate-heavy, to skewed, or to partially ordered inputs, while keeping the trace structure and seeds consistent for fair comparisons.
+
+If you have a real corpus, such as Jack London’s novels or a set of movie reviews, you can add realism without letting string comparisons dominate the timing. The safest approach is payload-only: attach the word as a payload field but keep ordering strictly by (key, id). This preserves memory and data-access patterns without turning string comparison into the main cost.
+
+Finally, document everything you do. Alongside each run, record:
+    •    the profile name,
+    •    the size parameters (N, or M/k for top-k, or S/R/b for prim-frontier, and T if you used early-stop), and
+    •    the seed.
+
+These records make your plots explainable and your results repeatable. When someone later asks, “Why does structure A perform better here but worse there?”, you’ll be able to point to your dataset description and clearly show what changed.
+
+ 
+
+Section 5 — Metrics, measurement, and fairness
+Now that we know what we’ll run (profiles) and what we’ll run them on (datasets), we need a plan for how to measure. The goal here is simple to say and surprisingly easy to miss: measure the right things, in the right places, under the same conditions. If we do that, differences we see will reflect real design trade-offs instead of noise.
+
+What are we timing? For each run, we time only the replay of a pre-generated trace on a single implementation—nothing else. We do not time the generator functions (like make_batch_then_drain_trace), the oracle, or any file I/O. The harness (see Section 6) loads the .trace into a vector, constructs an empty structure, does an untimed warm-up replay, then starts a timer and replays the operations. Whole-trace timing is the default for interleaved profiles (prim-frontier, top-k), since it captures the intended mix without per-operation timer overhead.
+
+Sometimes we split the time by phase
+
+For offline profiles such as batch-then-drain (and Kruskal’s early-stop variation), it’s often useful to separate “build” from “drain.” Two simple ways to do this while still using the same generator and trace:
+
+Timing markers in the trace
+
+Have the generator write a marker after the N inserts (e.g., a comment line “# TIMING_START”). The harness starts its timer when it sees that marker. Report build_time_ms (untimed if you prefer), drain_time_ms, and optionally total_time_ms = build + drain.
+
+Start the timer at the first F
+
+Keep the trace as-is (N inserts, then N times F;D). The harness counts inserts and starts the timer when it encounters the first F. This reports drain_time_ms while the build remains untimed. A second pass can time build only by generating a trace with inserts but no F/D.
+
+ Pease see Appendix A for details of full- and partial-trace timing examples.   
+
+What metrics should we report?  At minimum, record total_time_ms (whole-trace runs) or per-phase times when you split (build_time_ms and/or drain_time_ms). Since traces differ in length across profiles, also compute normalized numbers such as time_per_op and, for delete-heavy runs, time_per_deleteMin. Save these alongside the dataset metadata (profile, N, params, seed) so plots are reproducible and comparable.
+
+Don’t let one implementation preallocate while the other grows gradually unless your study is about preallocation. 
+
+Noise control matters, but it doesn’t have to be complicated. Run on a quiet machine if you can; close background tasks that do heavy I/O. Warm up the process once before the first timed run so the executable and common libraries are paged in. Then use repeated trials to average out the small jitters that remain.
+
+A simple policy works well for this course: for each (implementation, profile, , seed), run the same trace 5–10 times in a row (7 is a good number to use) and report the median. Since we use multiple seeds (five seeds) for each (implementation, profile, ), you end up with five median values, which we will discuss how to use for plotting in future chapters.
+
+Inside replay, do not allocate temporary vectors or sort anything—just feed the operations to the data structure. Any extra work you introduce inside the loop becomes part of what you’re “measuring,” and that defeats the point.
+
+What about deeper instrumentation, like counting comparator calls or the number of sift-downs? Those are great for understanding behavior, but they slow things down and can distort timings. Use an additional mode for that purpose if this type of instrumentation is of interest to you. Also, Section 6 discusses the notion of modes for timing. You can add an additional mode to the list of modes provided in that section for counting instrumentations.
+
+Finally, make the results easy to analyze. After each run, write a descriptive CSV row with everything you’d need to reproduce or explain the number later: implementation name, profile, N (or the profile’s parameters), seed, total operations, total time, and time per op if desired. That single CSV becomes the source for all your plots and tables; when a point looks strange, you can trace it back to the exact run that produced it. Our running example of Huffman profile provides examples of CSV entries.
+
+The ideas discussed  in this section—time only the replay, report clear metrics, keep conditions identical, reduce noise with medians and repeats—result in comparisons you can trust and discuss. That’s the whole purpose of empirical work: not to “prove” a winner in the abstract, but to learn how design choices behave under well-defined, repeatable conditions.
+
+ 
+
+Section 6 — The experiment harness (controlling the process)
+The harness is the small program that turns an operation trace into reliable numbers. its job is to read a trace, drive one implementation through that exact sequence of operations, and record clean measurements—without doing anything extra that would distort timing. Once this is in place, running a fair comparison is just a few simple commands. The reader is encouraged to refer back and forth to Empirical Analysis of Huffman Profile for the specifics of the ideas discussed here.
+
+ 
+
+Shape of a single timed run
+Load the trace into memory if you have stored it in a file. Construct an empty instance of the data structure being analyzed. Do one untimed warm-up replay so the code and common pages are resident. Then, as discussed in the previous section, perform several back-to-back replays of the same trace inside a timer. The harness should record each trial’s elapsed time separately; how we summarize them (median/mean) is decided later during analysis.
+
+Two core modes (plus one optional)
+
+Check mode: replay the trace on both the oracle and the implementation. Stop on the first mismatch and report the step number and both values.
+
+time mode: replay the same trace on the implementation alone with the timer wrapped around the whole replay loop. No printing, no file i/o, no parsing during the timed region.
+
+instrumented mode (optional): same as time mode but with lightweight counters (e.g., comparator calls, heap sifts). Use this in separate runs because counters can slow things down.
+
+A few important timing rules
+
+Load and parse the trace before starting the timer. Otherwise you’re timing your parser, not the data structure.
+
+Do not allocate large scratch buffers or sort anything inside the replay loop; only the data structure should allocate memory as needed.
+
+No logging inside the timed loop. Write results after the timer stops.
+
+Timer begins immediately before the first operation and ends immediately after the last.n
+
+ 
+
+Section 7 — Analyzing and visualizing results
+Collecting numbers is only half the job; the other half is turning them into pictures and sentences that teach you something. This section defines how we aggregate trials and seeds, which metrics we compute, and how we plot and read the figures.
+
+ 
+
+From trials to seeds to a single line:
+
+Within a seed: you typically have several trial times for the same (implementation, profile, N, seed). Summarize them with the median. 
+
+Across seeds: we run the same combination of (implementation, profile, N) with five seeds. Therefore, we collect five medians—each representing the central value of a separate run of trials. The interquartile range (IQR) of those medians measures how spread out the middle values are. To calculate a simple, robust estimate of variability while ignoring the extreme low and high medians, we choose the middle three of the five medians, effectively focusing on the central 60% of this small sample. 
+ 
+
+Metrics that answer specific questions:
+total time: end-to-end performance for the whole trace. great for which data structure performs better at each N.
+
+time per operation: total_time / ops_total. This doesn't give you any insight into the contribution of any single operation, but still provides numbers that you can compare. 
+
+time per deleteMin (when delete dominates): total_time / num_deleteMin. Useful in batch-then-drain when deleteMin dominates. 
+
+ 
+
+Scales that reveal shape
+We run N at powers of two (2^10 … 2^20). On a linear x-axis, those x-values are very unevenly spaced: the jump from 2^10→2^11 is tiny on the axis compared to 2^19→2^20. That visually squeezes small-N behavior into the left edge and stretches large-N behavior on the right, which makes trends harder to read. If you keep y linear in this view (y = time in ms), it’s still the right quantity—but the crowding of x can hide how time changes “per doubling.”
+
+A log-scaled x-axis fixes that spacing issue. Each doubling of N is the same distance apart on the plot, so you can literally “read off” how runtime grows as you double N: do points go up by ~×1.2, ×2, ×4 each tick? With log-x, y is still linear with respect to time, but the x-spacing is now proportional to , which compensates for the doubling of N and makes growth easy to compare across the whole range. 
+
+ 
+
+Reading plots against hypotheses
+Look for widening gaps in batch-then-drain if you predicted deleteMin-efficient structures would win with larger N. If two lines cross, it is an important indication that one implementation likely has lower constants at small N but a steeper growth rate; the other is the opposite. In prim-frontier, a flat-ish time-per-operation curve suggests the implementation handles interleaving well; wiggles or large error bars hint at sensitivity to bursts or caching.
+
+ 
+
+When something looks odd
+First, re-run the exact same trace to rule out a fluke. Then switch to instrumented mode on a smaller  and capture a couple of lightweight counters that connect to behavior:
+
+Heap work: number of sift-down/up steps.
+
+Comparator effect: number of comparisons performed.
+
+If the lightweight counters (sifts, comparisons) don’t track the timing deltas, the cause is usually elsewhere: hidden constant factors, environment differences, or quirks in the dataset. Triage it in this order, keeping everything simple and controlled.
+
+Different allocators can change timings a lot: one implementation might do many tiny heap allocations while another  preallocates vectors. Try equalizing this by giving both a simple pooled allocator or by reserving capacity. Check that your comparator is truly identical. Also make sure data types match (e.g., 32-bit vs 64-bit keys/ids) so node sizes are comparable.
+
+Then, verify the dataset itself. Inspect the trace header and a few lines: do both runs really use the same seed, N, and profile parameters? Is the trace length identical? 
+
+ 
+
+A simple recipe for figures
+Use the same color or marker for each implementation across all figures so readers learn the legend once. Always label axes with units (N on the x-axis, time in ms or throughput in ops/sec on the y-axis), and include key profile parameters (like b or k, in Prim and Top-k profiles, respectively) in the subtitle or caption so each figure can stand alone. Prefer a log-scaled x-axis when  progresses over powers of two as we discussed before.
+
+For each profile, plot total time vs N for all implementations on the same axes. Show faint points for individual seeds—i.e., one light, semi-transparent dot per (N, seed) using that seed’s median over trials. This lets readers see input-to-input variability and spot outliers without overwhelming the plot.  Then draw a solid line through the per-N median across seeds for each implementation; that line is the central trend you’ll compare. Include light error bars (across seeds) if you your graphics package allows that. Of course, depending on which graphics package you use, you might be limited in how easily you can manipulate the graph.
+
+Add a small companion panel (or second plot) with time per operation so you can distinguish between “more operations” and “slower operations.” Under each figure, include one sentence that answers “why is this interesting?” in plain English and says whether the result matched your hypothesis.
+
+ 
+
+Compare across profiles
+Place small multiples side-by-side—batch-then-drain, Kruskal (early-stop batch), prim-frontier, and top-k—using the same colors and similar axes. You’ll often see: one implementation dominates when the structure is large and draining, another shines under interleaving, and differences compress when the queue stays tiny and you’re mostly peeking. That’s the point of empirical work: not to identify a universal champion, but to map designs to the workloads where they excel.
+
+ 
+
+Section 8 — End-to-end process and how to package your results
+By now you have all the pieces—a clear API and comparator, well-defined workload profiles, reproducible datasets, a fair timing plan, a small harness, and a way to read plots. This section ties them together into a simple project layout that makes everything easy to find. Keep traces, code, results, and figures separate so you never wonder what’s raw and what’s derived. Here’s a layout that works well for this course:
+
+ 
+
+pq-study/
+  traces/
+    batch_then_drain/
+      N_1048576_seed_001.trace
+      N_1048576_seed_002.trace
+      ...
+    prim_frontier/
+      S64_R10000_b4_seed_007.trace
+    topk/
+      M_1048576_k_064_seed_003.trace
+  src/
+    impl_binheap/
+    impl_binomial/
+
+    impl_mystry_queue/
+    harness/
+  results/
+    timings.csv            # one row per (impl, profile, params, seed), medians included
+  figs/
+    batch_then_drain_time_vs_N.png
+    prim_frontier_time_vs_N.png
+    topk_time_vs_M_k64.png
+
+  Makefile                        # how to build
+  README.md                # details of how to generate traces, etc
+
+  Report.md                     # See section 9
+
+ 
+
+For an explicit example of a working project of this type, please refer to Empirical Analysis of Huffman Profile. 
+
+Naming is part of reproducibility. Let file names encode the essential parameters so you can scan a folder and know what you’re looking at: N or M and k for top-k; S, R, b for prim-frontier; the random seed; and the profile name. Inside each trace, keep the tiny header you’ve seen before: seed,  profile name, and parameter values. The harness doesn’t need to parse that header during timing—it’s there for humans, and much of it be copied into the csv so the metadata travels with the number.
+
+When you package results for someone else (or for your future self), aim for a bundle that can be re-run with one or two commands. The README should provide enough information for a user to run and reproduce your work. The csv should already have the columns you’d expect to filter on: implementation, profile, parameters, seed, total operations, total time, time per op, ops/sec, and any measurements that you collected. 
+
+A brief note on what not to include is just as helpful. Don’t check in giant binary datasets; traces are tiny text files and that’s the point. Don’t mix correctness logs with timing results; correctness belongs in the build scripts and test logs, timing goes in csv. Don’t commit local machine noise like temporary editor files or raw trial runs—your median-per-seed rows are enough, and you can always regenerate the raw trials if needed.
+
+The Makefile not only should be able to make the project, it should also have a clean target to remove the fobject files and the executables. 
+
+Section 9 — Baselines and reference points
+Before we compare sophisticated implementations, it helps to anchor the story with a couple of simple, “obviously right” baselines. Baselines don’t try to win—they make our numbers interpretable. If your fancy structure barely beats (or even loses to) a two-liner baseline, that’s a signal worth understanding. If it handily outperforms the baseline and the curves look as theory predicts, that builds confidence.
+
+Start with two tiny baselines you can write in an afternoon and trust forever:
+
+Sorted-vector priority queue
+Keep all items in a single vector that stays sorted by your comparator. Inserting a new item runs the inter-loop of an insertion sort algorithm to place it in its sorted position in O(n). Peeking and removing the minimum are O(1) because you keep the min at the end that can be popped on O(1). This baseline shines in batch-then-drain profiles where the expensive part (many inserts) happens only once, and then you do a long run of cheap F/D pairs. It’s also the perfect oracle repurposed to a higher use: same logic as our correctness model, just used for timing at scale.
+
+Unsorted-vector priority queue
+Keep items in insertion order (append only). Insert is O(1), but findMin scans the whole vector to find the best item O(n), and deleteMin removes it (often O(1) because you can swap it with the last element). This baseline models workloads where inserts dominate and peeks are rare—useful as a lower bound in top-k or frontier mixes to show why indexing structures exist at all.
+
+Both baselines use the exact same item layout and comparator as everything else. And because deleteMin is void in our API, “extract” is always written as F then D in the trace, even for these baselines.
+
+Why these two? Together, they bracket the design space: one pays the price at insert time to make removals cheap; the other does the opposite. Real priority queues (binary heap, binomial/pairing heap, etc.) live between those extremes, trying to make both ends reasonably fast. When you plot them alongside your implementations, you get immediate context:
+
+If a heap can’t beat “sorted vector” on batch-then-drain, you’ve likely got an inefficiency (or a bug) in deletion or build.
+
+If “unsorted vector” keeps up on top-k with small k, that tells you constant factors dominate and peeks are the real cost in your priority queue.
+
+Crossovers are instructive: a baseline might win at tiny N due to lower constants but lose as N grows—exactly the kind of slope change you should learn to read.
+
+Use baselines as sanity tests, too. Before you trust any large figure, run one trace per profile at a mid-size N on all implementations plus both baselines. The ordering of curves should make sense relative to their operation costs. If the unsorted-vector line sits below the heap on a delete-heavy trace, that’s a red flag—either the heap has a bug, the trace isn’t what you think, or your timer is in the wrong place.
+
+ 
+
+Section 10 — Reporting template and how to tell the story
+The whole point of this work is to turn careful measurements into a clear, reproducible story. A good report reads like a guided tour: what question you asked, what you expected, what you ran, what you found, and what it means. Keep the voice friendly and specific. Name profiles and parameters in plain language. Show just enough figures to answer the question, and make each figure self-explanatory.
+
+Open with the question and a one-paragraph abstract. State the interface you compared, the profiles you used, and the headline finding. Example: “We compared two priority-queue implementations under three profiles—batch-then-drain, prim-frontier, and top-k—using items (key, id) with comparator ‘key asc, then id asc’. Binary heap dominated batch-then-drain at large N, while both implementations were similar for top-k with small k; crossover points matched our hypotheses.”
+
+Give a short background and your hypotheses. One paragraph is enough: remind the reader why the chosen profiles matter, and say what you expected before running anything. Tie expectations to operation patterns, not brand names. For example: “Because batch-then-drain is deletion-heavy after a single build, we expected structures with cheap deleteMin to widen their lead as N grows.”
+
+Name the API and the comparator rule you used (see Section 2). Reflect on how you generated the traces—using the profile description in Section 3 and the dataset plan in Section 4—and note that all traces are verified against the oracle before timing. Mention the harness timing policy described in Section 5: only the replay loop is timed, trial results are based on medians, and seeds are fixed for reproducibility. This context anchors the reader so that all subsequent figures are understood under the same assumptions.
+
+Present your results as answers, not just as raw plots. For each profile, show time vs. N on a single chart that includes all implementations. Use small points to represent individual seeds (if multiple seeds were used) and a solid line for the median.
+
+Below each plot, include a single-sentence interpretation that answers the “so what?” question and ties back to your hypothesis. For example:
+
+“As predicted, the binary heap curve is flatter on a log–log scale in the batch-then-drain profile; the lines cross near N = 2¹⁴, after which it outperforms the binomial queue by 1.6–2.1×.”
+
+
+If you also collected a memory proxy, include a small companion figure so readers can see the performance–memory trade-off. Avoid listing large tables of numbers; instead, let the figure and its caption convey the key findings.
+
+If you implemented multiple profiles, interpret and generalize your findings carefully. In a brief discussion, relate the observed behavior to the operation patterns—for example, why interleaving favored one design or why the top-k pattern reduced differences among implementations. Note any crossovers and explain them with the simplest defensible cause (e.g., constant factors dominating at small N versus asymptotic growth at large N, or tie density under “many duplicates”).
+
+
+If an outlier appeared, mention that you re-ran the same trace and verified it against the oracle. A brief statement describing what you ruled out helps establish the credibility of your analysis.
+
+End with takeaways. A few sentences that a junior student could re-tell are perfect: “For deletion-heavy drains after a batch build, binary heap was consistently fastest beyond 2^14 items. In steady interleaving with small bursts, both designs were close, with small advantages shifting by key distribution. When the queue stayed tiny (top-k, k≤256), constant factors dominated and differences narrowed.”
+
+Finish by pointing to the artifacts. Tell the reader exactly where the traces, code, CSV, and figure scripts live, and how to rerun one plot from scratch. One line like “Reproduce Figure 2, see README.md for exact commands” turns your report into a living, informative bundle.
+
+To make this concrete, here’s a skeleton you can use. Keep prose short and specific
+
+ 
+
+Title: Empirical Comparison of [impl A] and [impl B] for a Priority-Queue API
+
+abstract
+We compare [impl A] and [impl B] across three workload profiles—batch-then-drain, prim-frontier, and top-k—using items (key, id) and comparator “key asc, then id asc.” Traces are generated with fixed seeds, checked against an oracle, and timed with a harness that measures only the replay loop. Headline: [one-sentence result + where curves cross].
+
+1. Question and hypotheses
+
+ We ask: [question]. We expect: [hypothesis per profile], because [operation-pattern reasoning].
+
+2. Method (one paragraph)
+
+API: insert, findMin, deleteMin, extractMin. Items: (key, id [, payload]) [if you used payload]; comparator: key asc, then id asc. Traces: generated as in Sections 2–3; correctness via oracle; timing as in Section 5 (medians over trials, fixed seeds). Implementations: [names]. Environment: [blue.cs.sonoma.edu].
+
+3. Datasets (one paragraph)
+Profiles used: [names], parameters summarized in Table A1. Key distributions: [uniform, many duplicates, optional skew]. Sizes: N = 2^10 … 2^20; [seeds per N if multiple seed used]. Top-k used k ∈ [values].
+
+4. Results by profile (if you implemented multiple profiles)
+
+Batch-then-drain
+Figure 1 shows time vs N. Result: [sentence]. Crossover: [where, why]. Memory proxy (if any): [sentence].
+
+Prim-frontier
+Figure 2 shows time vs N. Result: [sentence]. Sensitivity to burst size: [sentence].
+
+Top-k
+Figure 3 shows time vs N for k = [values]. Result: [sentence]. Constants dominate: [sentence].
+
+5. Discussion
+Connect patterns to outcomes. See the analysis in Empirical Analysis of the Huffman Profile.
+
+6. Takeaway
+
+Concluding remarks.
+
+
+
+
+ 
+
+ 
+

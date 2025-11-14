@@ -1,0 +1,56 @@
+The main question for batch then drain was, which of these queues would be most efficient?
+Before running the experient I expect binomial queue to outperforma binary_heap, as from what I recall binomial queue has 0(1) Amortized insertions. as opposed to logn insertions from its competetetor binary_heap. So it may have an advantage in terms of efficiency in this program. The only hiccup I think may be the deletion aspect, would binary_heaps progression be faster? I will stick with my answer that binomial Queue would be on top.
+
+2. After observing the data that I collected, i was in fact wrong about binomial queues being faster, where binary_heap beach binomial queue by around 4.8x faster time at N = 2^20. This did not match my expectation. I stopped running Quadratic oracle at N = 2^15 as it grows infinitely faster the more N values it gets compared to the rest (IT would not fit on the graph properly)
+
+3. Why my hypothesis was wrong and why binary_heap is actually faster:
+My initial reasoning focused too heavily on the insertion phase. I correctly identified that binomial queue has O(1) amortized insertions versus binary heap's O(log N) insertions, but I failed to fully account for the batch-then-drain workload pattern: N inserts followed by N deletions. 
+The key insight I missed: In batch-then-drain, deletions dominate the total runtime. After the initial build phase, we perform N consecutive deleteMin operations. While binomial queue's amortized O(1) insertions are indeed faster during the build, this advantage is quickly outweighed by the deletion phase.
+
+Why I think binary_heap wins:
+- Cache locality: Binary heap stores all elements in a contiguous array. When performing deleteMin, it moves the last element to the root and sifts it down through adjacent array positions. This sequential memory access pattern is highly cache-friendly, meaning the CPU can efficiently load multiple elements into cache at once.
+- Binomial queue's deleteMin is more complex: it must scan the root list, remove the min tree, then merge all the children back into the forest structure. This involves multiple pointer dereferences and tree merging operations that are less cache-friendly I come to realize.
+- Constant factors matter: While both implementations are O(log N) for deletions, binary heap's constant factors are significantly lower due to its array-based structure and predictable memory access patterns. The 4.8x performance difference at N=2^20 reflects these constant factor differences, not just asymptotic complexity.
+my hypothesis overemphasized the insertion advantage while underestimating how deletion-heavy workloads favor structures with better cache locality and simpler deletion algorithms. The batch-then-drain profile reveals that constant factors and memory access patterns can outweigh asymptotic advantages when the workload is dominated by a particular operation type.
+
+
+The only graph that follows nlogn baseline is binary heap, i assume that means it's a true time complexity, it will never be better at insertng
+and it would never be worse at delting, than nlogn. (Guaranteed efficiency) as oppposed to the amortize O(1) insertion for binomial queues i focused on
+
+
+I ran this experiment locally on my m2 macbook air using the provided seed 23 from the professor to make sure everyones 
+data was the same that we ran, resulting in reproduceable outcomes. We did the first blank trial, the 7 measured trials.
+
+batch-then-drain is different from huffman because in huffman you mix inserts and deletes together. 
+but in batch-then-drain you do all N inserts first, then all N deletes. so it really tests deletion 
+performance more.
+
+i think this is why binary heap wins - it's really good at deletions because of the array structure. 
+huffman might favor binomial queue more since you're mixing operations, but here deletions dominate.
+
+at small N like 2^10 the difference isn't huge, but by 2^20 binary heap is 4.8x faster. so the advantage 
+gets bigger as N grows.
+
+both are O(N log N) theoretically, but constant factors matter a lot. the 4.8x difference shows that 
+even with same big-O, binary heap's simpler operations win in practice.
+
+looking at the graph, both lines have similar slopes (both growing like N log N), but binary heap's line 
+is always lower. the gap widens as N gets bigger, which makes sense - constant factors add up over 
+many operations.
+
+linear_base is weird its not even a real priority queue but it's super fast at small N. shows what 
+O(1) overhead looks like i guess, but obviously wrong. 
+
+files are in:
+traces/batch_then_drain/ for the trace files
+csvs/batch_then_drain_profile.csv for the timing data
+charts/pq_multi_impl_anchor_heap_tooltips.html for the plot
+
+
+
+
+
+-- Extra note to self, Analyize the task at hand before making a guess, in terms of this deletions are obviously dominant, and having to re-arrange entire 
+binomial queue for each remove is insane as opposed to a simple sifting garantuing a logn runtime, binomial queues are a clear loser.
+I got a question on the first exam based on something like this haha. not 
+considering the use-case and data structure. (this analysis hopefully helps me think deeper)
